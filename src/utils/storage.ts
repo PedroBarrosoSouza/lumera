@@ -1,8 +1,15 @@
-import type { AppSettings, UserWorkspaceData } from '../types';
+import type {
+  AppSettings,
+  CatalogProduct,
+  UserProfile,
+  UserWorkspaceData,
+} from '../types';
 import { getMondayOfWeek, getTodayStr } from './dateUtils';
 
 const SESSION_TOKEN_KEY = 'creamy-session-token-v2';
+const SESSION_USER_KEY = 'lumera-session-user-v2';
 const USER_CACHE_PREFIX = 'creamy-user-cache-v2:';
+const CATALOG_CACHE_KEY = 'lumera-catalog-cache-v2';
 const TIMER_PREFIX = 'creamy-timer-v2:';
 const NOTIFIED_PREFIX = 'creamy-notified-v2:';
 
@@ -16,7 +23,9 @@ export function getDefaultSettings(): AppSettings {
   };
 }
 
-export function normalizeSettings(partial?: Partial<AppSettings> | null): AppSettings {
+export function normalizeSettings(
+  partial?: Partial<AppSettings> | null,
+): AppSettings {
   const defaults = getDefaultSettings();
   if (!partial) return defaults;
   return {
@@ -48,6 +57,27 @@ export function saveSessionToken(token: string | null): void {
   }
 }
 
+export function loadCachedUser(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(SESSION_USER_KEY);
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedUser(user: UserProfile | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(SESSION_USER_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function loadUserCache(userId: string): UserWorkspaceData | null {
   try {
     const raw = localStorage.getItem(`${USER_CACHE_PREFIX}${userId}`);
@@ -61,6 +91,25 @@ export function loadUserCache(userId: string): UserWorkspaceData | null {
 export function saveUserCache(userId: string, data: UserWorkspaceData): void {
   try {
     localStorage.setItem(`${USER_CACHE_PREFIX}${userId}`, JSON.stringify(data));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadCatalogCache(): CatalogProduct[] | null {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CatalogProduct[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCatalogCache(catalog: CatalogProduct[]): void {
+  try {
+    localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog));
   } catch {
     // Ignore storage errors
   }

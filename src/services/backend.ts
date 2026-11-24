@@ -155,7 +155,10 @@ function createSupabaseBackend(client: SupabaseClient): BackendService {
       const { data, error } = await client.rpc('skincare_get_session', {
         p_token: token,
       });
-      if (error || !data) return null;
+      if (error) {
+        throw new Error(error.message);
+      }
+      if (!data) return null;
       const rawUser = data as RawRpcUser;
       return {
         user: {

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.app_users (
 CREATE TABLE IF NOT EXISTS public.app_sessions (
   token uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
-  expires_at timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '365 days'),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -121,8 +121,8 @@ BEGIN
   DELETE FROM public.app_sessions
   WHERE user_id = v_user.id AND expires_at < now();
 
-  INSERT INTO public.app_sessions (user_id)
-  VALUES (v_user.id)
+  INSERT INTO public.app_sessions (user_id, expires_at)
+  VALUES (v_user.id, now() + interval '365 days')
   RETURNING token INTO v_token;
 
   RETURN jsonb_build_object(
@@ -155,6 +155,10 @@ BEGIN
   IF NOT FOUND THEN
     RETURN NULL;
   END IF;
+
+  UPDATE public.app_sessions
+  SET expires_at = now() + interval '365 days'
+  WHERE token = p_token;
 
   RETURN public._skincare_user_payload(v_user);
 END;

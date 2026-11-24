@@ -31,10 +31,15 @@ import { getTodayStr } from './utils/dateUtils';
 import { playSoftChime, showAppNotification } from './utils/notifications';
 import { getDayPlan } from './utils/schedule';
 import {
+  loadCachedUser,
   loadCalmingTimerEnd,
+  loadCatalogCache,
   loadNotifiedToday,
   loadSessionToken,
+  loadUserCache,
+  saveCachedUser,
   saveCalmingTimerEnd,
+  saveCatalogCache,
   saveNotifiedToday,
   saveSessionToken,
   saveUserCache,
@@ -80,7 +85,7 @@ export function App() {
   const skipNextSaveRef = useRef<boolean>(false);
   const todayStr = getTodayStr();
 
-  // Restore existing session + global product catalog on mount
+  // Restore existing session + global product catalog on mount (instant from cache, then sync)
   useEffect(() => {
     let cancelled = false;
     const initAuth = async () => {
@@ -89,31 +94,62 @@ export function App() {
         if (!cancelled) setIsAuthLoading(false);
         return;
       }
+
+      const cachedUser = loadCachedUser();
+      const cachedCatalog = loadCatalogCache();
+      const cachedWorkspace = cachedUser ? loadUserCache(cachedUser.id) : null;
+      const hasWarmCache = Boolean(cachedUser && cachedWorkspace);
+
+      if (hasWarmCache && cachedUser && cachedWorkspace) {
+        const effectiveCatalog = cachedCatalog ?? [...INITIAL_CATALOG_PRODUCTS];
+        skipNextSaveRef.current = true;
+        setCatalog(effectiveCatalog);
+        setSessionToken(savedToken);
+        setCurrentUser(cachedUser);
+        setWorkspace({
+          ...cachedWorkspace,
+          plan: ensureNormalizedPlan(cachedWorkspace.plan, effectiveCatalog),
+        });
+        setCalmingTimerEnd(loadCalmingTimerEnd(cachedUser.id));
+        setNotifiedToday(loadNotifiedToday(cachedUser.id));
+        setIsAuthLoading(false);
+      }
+
       try {
         const res = await backend.restoreSession(savedToken);
         if (cancelled) return;
         if (res) {
           const loadedCatalog = await backend
             .listCatalog(savedToken)
-            .catch(() => [...INITIAL_CATALOG_PRODUCTS]);
+            .catch(() => cachedCatalog ?? [...INITIAL_CATALOG_PRODUCTS]);
           if (cancelled) return;
+          const normalizedWorkspace: UserWorkspaceData = {
+            ...res.data,
+            plan: ensureNormalizedPlan(res.data.plan, loadedCatalog),
+          };
           skipNextSaveRef.current = true;
+          saveCachedUser(res.user);
+          saveCatalogCache(loadedCatalog);
+          saveUserCache(res.user.id, normalizedWorkspace);
           setCatalog(loadedCatalog);
           setSessionToken(savedToken);
           setCurrentUser(res.user);
-          setWorkspace({
-            ...res.data,
-            plan: ensureNormalizedPlan(res.data.plan, loadedCatalog),
-          });
+          setWorkspace(normalizedWorkspace);
           setCalmingTimerEnd(loadCalmingTimerEnd(res.user.id));
           setNotifiedToday(loadNotifiedToday(res.user.id));
         } else {
+          // Session explicitly invalid/expired on server
           saveSessionToken(null);
+          saveCachedUser(null);
           setSessionToken(null);
+          setCurrentUser(null);
+          setWorkspace(null);
         }
       } catch {
-        if (!cancelled) {
+        // Offline or transient network error: keep cached session logged in if available
+        if (!cancelled && !hasWarmCache) {
           saveSessionToken(null);
+          saveCachedUser(null);
           setSessionToken(null);
         }
       } finally {
@@ -252,17 +288,22 @@ export function App() {
     const res = await backend.login(username, password);
     const loadedCatalog = await backend
       .listCatalog(res.token)
-      .catch(() => [...INITIAL_CATALOG_PRODUCTS]);
+      .catch(() => loadCatalogCache() ?? [...INITIAL_CATALOG_PRODUCTS]);
+
+    const normalizedWorkspace: UserWorkspaceData = {
+      ...res.data,
+      plan: ensureNormalizedPlan(res.data.plan, loadedCatalog),
+    };
 
     skipNextSaveRef.current = true;
     saveSessionToken(res.token);
+    saveCachedUser(res.user);
+    saveCatalogCache(loadedCatalog);
+    saveUserCache(res.user.id, normalizedWorkspace);
     setCatalog(loadedCatalog);
     setSessionToken(res.token);
     setCurrentUser(res.user);
-    setWorkspace({
-      ...res.data,
-      plan: ensureNormalizedPlan(res.data.plan, loadedCatalog),
-    });
+    setWorkspace(normalizedWorkspace);
     setCalmingTimerEnd(loadCalmingTimerEnd(res.user.id));
     setNotifiedToday(loadNotifiedToday(res.user.id));
     setActiveTab('today');
@@ -276,6 +317,7 @@ export function App() {
     }
     const tok = sessionToken;
     saveSessionToken(null);
+    saveCachedUser(null);
     setSessionToken(null);
     setCurrentUser(null);
     setWorkspace(null);
@@ -386,6 +428,7 @@ export function App() {
       if (!sessionToken) throw new Error('Sessão expirada.');
       const res = await backend.upsertCatalogProducts(sessionToken, products);
       setCatalog(res.catalog);
+      saveCatalogCache(res.catalog);
       return res;
     },
     [sessionToken],
@@ -399,6 +442,7 @@ export function App() {
         product,
       );
       setCatalog(nextCatalog);
+      saveCatalogCache(nextCatalog);
       return nextCatalog;
     },
     [sessionToken],

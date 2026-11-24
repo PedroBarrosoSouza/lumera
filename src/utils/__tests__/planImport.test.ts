@@ -311,4 +311,20 @@ describe('Base Acumulativa no Backend, Áreas Individuais e Permissões Admin', 
 
     expect(addDays('2026-12-01', 1)).toBe('2026-12-02');
   });
+
+  it('mantém a sessão persistente ao reiniciar o app até que o usuário clique em sair', async () => {
+    const sharedStorage = createMemoryStorage();
+    const firstVisit = createLocalDemoBackend(sharedStorage);
+    const loginRes = await firstVisit.login('pedro', '123');
+
+    // Simula fechamento e reabertura do app com nova instância do backend usando o mesmo storage
+    const secondVisit = createLocalDemoBackend(sharedStorage);
+    const restored = await secondVisit.restoreSession(loginRes.token);
+    expect(restored?.user.username).toBe('pedro');
+    expect(restored?.user.role).toBe('admin');
+
+    // Só encerra quando faz logout explícito
+    await secondVisit.logout(loginRes.token);
+    expect(await secondVisit.restoreSession(loginRes.token)).toBeNull();
+  });
 });
